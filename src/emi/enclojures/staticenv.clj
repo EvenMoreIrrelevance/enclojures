@@ -10,29 +10,46 @@
   []
   `(static-env* ~'&env))
 
-(defn with-static-binding*
+(defn with-static-env*
   [base-env keys->vals & body]
   `(let [~(with-meta -entry-point {::static-env (merge (static-env* base-env) keys->vals)}) nil]
      ~@body))
 
-(defmacro with-static-binding
+(defmacro with-static-env
   [keys->vals & body]
-  (apply with-static-binding* &env keys->vals body))
+  (apply with-static-env* &env keys->vals body))
+
+(defn -binding-name [form]
+  (condp #(%1 %2) form
+    simple-symbol? form
+    map? (:as form)
+    vector?
+    (if (and
+          (= 2 (count form))
+          (= `& (first form)))
+      (recur (second form))
+      (let [as-pos (.indexOf ^java.util.List form :as)]
+        (when (nat-int? as-pos)
+          (nth form (inc as-pos)))))))
 
 (defmacro nloop
-  {:clj-kondo/lint-as 'clojure.core/loop}
   [loop-head & body]
-  `(with-static-binding ~{::nloop-keys (mapv first (partition 2 loop-head))}
-     (loop ~loop-head
-       ~@body)))
+  (let [bindings (mapv first (partition 2 loop-head))
+        binding-names (mapv -binding-name bindings)]
+    (if (some nil? binding-names)
+      (throw (ex-info "couldn't resolve some loop binding names"
+               {:bindings bindings :binding-names binding-names}))
+      `(with-static-env ~{::nloop-var-names binding-names}
+         (loop ~loop-head
+           ~@body)))))
 
 (defmacro nrecur
   [& {:as names->vals}]
-  (let [{::keys [nloop-keys]} (static-env)
-        extraneous (keys (apply dissoc names->vals nloop-keys))]
+  (let [{::keys [nloop-var-names]} (static-env)
+        extraneous (vec (keys (apply dissoc names->vals nloop-var-names)))]
     (if (not-empty extraneous)
       (throw (ex-info "no such loop variables" {:extraneous extraneous}))
-      `(recur ~@(for [k nloop-keys] (get names->vals k k))))))
+      `(recur ~@(for [k nloop-var-names] (get names->vals k k))))))
 
 (defn -toposort 
   [graph xs]

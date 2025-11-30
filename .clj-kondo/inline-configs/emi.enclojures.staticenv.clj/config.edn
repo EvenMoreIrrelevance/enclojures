@@ -1,1 +1,0 @@
-{:lint-as {emi.enclojures.staticenv/nloop clojure.core/loop}}
