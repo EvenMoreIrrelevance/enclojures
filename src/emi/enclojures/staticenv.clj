@@ -6,15 +6,16 @@
   (let [[k] (find env -entry-point)]
     (::static-env (meta k))))
 
-(defmacro static-env 
+(defmacro static-env
   []
   `(static-env* ~'&env))
 
-(defn with-static-binding* 
+(defn with-static-binding*
   [base-env keys->vals & body]
   `(let [~(with-meta -entry-point {::static-env (merge (static-env* base-env) keys->vals)}) nil]
      ~@body))
-(defmacro with-static-binding 
+
+(defmacro with-static-binding
   [keys->vals & body]
   (apply with-static-binding* &env keys->vals body))
 
@@ -22,7 +23,7 @@
   {:clj-kondo/lint-as 'clojure.core/loop}
   [loop-head & body]
   `(with-static-binding ~{::nloop-keys (mapv first (partition 2 loop-head))}
-     (loop ~loop-head 
+     (loop ~loop-head
        ~@body)))
 
 (defmacro nrecur
@@ -33,9 +34,10 @@
       (throw (ex-info "no such loop variables" {:extraneous extraneous}))
       `(recur ~@(for [k nloop-keys] (get names->vals k k))))))
 
-(defn -toposort [graph xs]
+(defn -toposort 
+  [graph xs]
   (let [xs (set xs)]
-    (nloop [stack (into () xs) 
+    (nloop [stack (into () xs)
             color {}
             out []]
       (if (empty? stack)
@@ -50,7 +52,7 @@
                                      (contains? xs %)))
                       (graph curr))
               color (assoc color curr :gray))
-            
+
             :black
             (nrecur stack (pop stack))
 
