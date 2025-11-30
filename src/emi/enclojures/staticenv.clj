@@ -1,4 +1,5 @@
-(ns emi.enclojures.staticenv)
+(ns emi.enclojures.staticenv
+  (:require [emi.enclojures.conditions :as conditions]))
 
 (def -entry-point 'EMI_enclojures_staticenv_entrypoint)
 (defn static-env*
@@ -32,26 +33,33 @@
         (when (nat-int? as-pos)
           (nth form (inc as-pos)))))))
 
+(conditions/defcondition ::unresolved-loop-bindings ::conditions/input-error)
 (defmacro nloop
   [loop-head & body]
   (let [bindings (mapv first (partition 2 loop-head))
         binding-names (mapv -binding-name bindings)]
-    (if (some nil? binding-names)
-      (throw (ex-info "couldn't resolve some loop binding names"
-               {:bindings bindings :binding-names binding-names}))
+    (or
+      (when (some nil? binding-names)
+        (conditions/raise ::unresolved-loop-bindings
+          {:bindings bindings :binding-names binding-names
+           ::conditions/restarts {::conditions/ignore (constantly nil)}}))
       `(with-static-env ~{::nloop-var-names binding-names}
          (loop ~loop-head
            ~@body)))))
 
+(conditions/defcondition ::no-such-loop-variable ::conditions/input-error)
 (defmacro nrecur
   [& {:as names->vals}]
   (let [{::keys [nloop-var-names]} (static-env)
         extraneous (vec (keys (apply dissoc names->vals nloop-var-names)))]
-    (if (not-empty extraneous)
-      (throw (ex-info "no such loop variables" {:extraneous extraneous}))
+    (or
+      (when (seq extraneous)
+        (conditions/raise ::no-such-loop-variable
+          {:extraneous extraneous
+           ::conditions/restarts {::conditions/ignore (constantly nil)}}))
       `(recur ~@(for [k nloop-var-names] (get names->vals k k))))))
 
-(defn -toposort 
+(defn -toposort
   [graph xs]
   (let [xs (set xs)]
     (nloop [stack (into () xs)

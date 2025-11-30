@@ -1,12 +1,21 @@
 (ns emi.enclojures.conditions)
 
 (defonce !condition-hierarchy (make-hierarchy))
+(declare raise)
 (def ^:dynamic *-handlers*
   (conj ()
-    (fn [hier cond data]
-      (if (isa? hier cond ::condition)
-        (throw (ex-info "unhandled condition" {:condition cond :data data}))
-        (throw (ex-info "not a condition" {:condition cond :data data}))))))
+    (fn [hier cond_ data]
+      (cond
+        (isa? hier cond_ ::not-a-condition)
+        (throw (ex-info "not a condition" data))
+        (isa? hier cond_ ::warning)
+        (binding [*out* *err*]
+          (println (str "caught warning: " cond_ "\n" (::message data)))
+          (reduced nil))
+        (isa? hier cond_ ::condition)
+        (throw (ex-info (str "unhandled condition: " cond_ "\n" (::message data)) data))
+        :else
+        (reduced (raise ::not-a-condition {:condition cond_ :data data}))))))
 
 (defn condition?
   [chier self]
@@ -22,20 +31,25 @@
                  {:defined defined :parent parent}))
         (derive % defined parent)))))
 
+(defn -throw-if-gray [color node]
+  (if (= :gray (color node))
+    (throw (ex-info "cycle in graph" {:hinge node}))
+    node))
+
 (defn -toposort [graph xs]
   (let [xs (set xs)]
     (loop [stack (into () xs)
            color {}
            out []]
       (if (empty? stack)
-        out 
+        out
         (let [curr (peek stack)]
           (case (color curr :white)
             :white
             (recur
-              (into stack (filter #(if (= :gray (color %))
-                                     (throw (ex-info "cycle in graph" {:hinge %}))
-                                     (contains? xs %)))
+              (into stack (comp
+                            (filter (partial contains? xs))
+                            (map (partial -throw-if-gray color)))
                 (graph curr))
               (assoc color curr :gray)
               out)
@@ -68,28 +82,40 @@
         {:keys [handlers-by-specificity]}
         (if (identical? (:hier cached) hierarchy)
           cached
-          (let [new_ {:hier hierarchy :proj (-toposort (:descendants hierarchy) handlers)}]
+          (let [new_ {:hier hierarchy :handlers-by-specificity (-toposort (:descendants hierarchy) handlers)}]
             (alter-var-root !inline-cache
               (fn [_] new_))))]
     (some #(when (isa? condition %) %) handlers-by-specificity)))
 
-(defn -emit-handler 
+(defn -reduced-unless-pass
+  [result]
+  (when-not (= result ::pass)
+    (reduced result)))
+
+(defn -emit-handler
   [bodies]
   (let [cache (intern (create-ns 'emi.enclojures.conditions.caches) (symbol (str "cache" (random-uuid))))
         handled (into #{} (map first) bodies)
         data_ (gensym "data")]
-    `(fn [hier# cond# ~data_]
-       (case (-find-handler ~cache hier# ~handled cond#)
-         ~@(apply concat
-             (for [[tag bind & body] bodies] 
-               `[~tag (reduced (let [~bind ~data_] ~@body))]))
-         nil))))
+    (or
+      (when-let [non-conditions (not-empty
+                                  (into #{} (comp
+                                              (map first)
+                                              (remove (partial condition? !condition-hierarchy)))
+                                    bodies))]
+        (raise ::handler-for-noncondition 
+          {::message (str "emitting handlers for non-conditions: " non-conditions)}))
+      `(fn [hier# cond# ~data_]
+         (case (-find-handler ~cache hier# ~handled cond#)
+           ~@(apply concat
+               (for [[tag bind & body] bodies]
+                 `[~tag (-reduced-unless-pass (let [~bind ~data_] ~@body))]))
+           nil)))))
 
 (comment
-  (-emit-handler  
+  (-emit-handler
     '[[::lol _ 3]
-      [::lmao {:keys [x y]} (+ x y)]])
-  )
+      [::lmao {:keys [x y]} (+ x y)]]))
 
 (defn -try-if-finally
   [body]
@@ -100,8 +126,7 @@
 
 (comment
   (-try-if-finally `[1 (finally 3)])
-  (-try-if-finally `[1 2])
-  )
+  (-try-if-finally `[1 2]))
 
 (defmacro handling [hspec & body]
   `(binding [*-handlers* (conj *-handlers* ~(-emit-handler hspec))]
@@ -110,19 +135,30 @@
 (defn raise
   ([condition] (raise condition nil))
   ([condition data]
-   (let [hierarchy !condition-hierarchy]
-     @(some #(% hierarchy condition data) *-handlers*))))
+   (let [real-data
+         (if-not (map? data)
+           {::data data ::handling condition}
+           (try (assoc data ::handling condition)
+             (catch Exception e
+               {::data data ::handling condition ::error-associating e})))
+         hierarchy !condition-hierarchy]
+     @(some #(% hierarchy condition real-data) *-handlers*))))
+
+(defcondition ::error)
+(defcondition ::input-error ::error)
+(defcondition ::warning)
+(defcondition ::not-a-condition)
+(defcondition ::handler-for-noncondition ::warning)
 
 (comment
   (do
-    (defcondition ::error ::condition)
     (defcondition ::out-of-memory ::error)
-    (defcondition ::minor-error ::error)
-    (defcondition ::warning ::condition))
-  
+    (defcondition ::minor-error ::error))
+
   (handling [(::error _ "error")
              (::minor-error e ["small error" e])
-             (::warning e (do (println "warning") e))]
+             (::warning e (do (println "warning") e))
+             ("couldn't be a condition if it tried" _ 1)]
     [(raise ::error nil)
      (raise ::warning "hello")
      (raise ::minor-error 3)
