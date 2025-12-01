@@ -1,5 +1,7 @@
 (ns emi.enclojures.conditions)
 
+(set! *warn-on-reflection* true)
+
 (defonce !condition-hierarchy (make-hierarchy))
 (declare raise)
 (def ^:dynamic *-handlers*
@@ -13,7 +15,10 @@
           (println (str "caught warning: " cond_ "\n" (::message data)))
           (reduced nil))
         (isa? hier cond_ ::condition)
-        (throw (ex-info (str "unhandled condition: " cond_ "\n" (::message data)) data))
+        (throw (cond-> (ex-info 
+                         (str "unhandled condition: " cond_ "\n" (::message data)) 
+                         (dissoc data ::stacktrace))
+                 (::stacktrace data) (doto (Exception/.setStackTrace (::stacktrace data)))))
         :else
         (reduced (raise ::not-a-condition {:condition cond_ :data data}))))))
 
@@ -30,6 +35,14 @@
         (throw (ex-info "can't derive from something that isn't a condition"
                  {:defined defined :parent parent}))
         (derive % defined parent)))))
+
+(defn undef-condition
+  [condition]
+  (alter-var-root (var !condition-hierarchy)
+    (fn [h] 
+      (or 
+        (reduce #(underive % condition %2) h (parents h condition))
+        (make-hierarchy)))))
 
 (defn -throw-if-gray [color node]
   (if (= :gray (color node))
@@ -79,13 +92,13 @@
 (defn -find-handler
   [!inline-cache hierarchy handlers condition]
   (let [cached @!inline-cache
-        {:keys [handlers-by-specificity]}
+        {:keys [hier handlers-by-specificity]}
         (if (identical? (:hier cached) hierarchy)
           cached
           (let [new_ {:hier hierarchy :handlers-by-specificity (-toposort (:descendants hierarchy) handlers)}]
             (alter-var-root !inline-cache
               (fn [_] new_))))]
-    (some #(when (isa? condition %) %) handlers-by-specificity)))
+    (some #(when (isa? hier condition %) %) handlers-by-specificity)))
 
 (defn -reduced-unless-pass
   [result]
@@ -94,7 +107,10 @@
 
 (defn -emit-handler
   [bodies]
-  (let [cache (intern (create-ns 'emi.enclojures.conditions.caches) (symbol (str "cache" (random-uuid))))
+  (let [cache (intern 
+                (create-ns 'emi.enclojures.conditions.caches) 
+                (symbol (str "cache" (random-uuid)))
+                nil)
         handled (into #{} (map first) bodies)
         data_ (gensym "data")]
     (or
@@ -132,20 +148,41 @@
   `(binding [*-handlers* (conj *-handlers* ~(-emit-handler hspec))]
      ~@(-try-if-finally body)))
 
-(defn raise
-  ([condition] (raise condition nil))
+(defn -coerce-condition
+  [condition data]
+  (if-not (map? data)
+    {::data data ::handling condition}
+    (try (assoc data ::handling condition)
+      (catch Exception e
+        {::data data ::handling condition ::error-associating e}))))
+
+(defn -raise-coerced [condition data]
+  (let [hierarchy !condition-hierarchy]
+    @(some #(% hierarchy condition data) *-handlers*)))
+
+(defn raise-without-stacktrace
+  ([condition]
+   (raise-without-stacktrace condition nil))
   ([condition data]
-   (let [real-data
-         (if-not (map? data)
-           {::data data ::handling condition}
-           (try (assoc data ::handling condition)
-             (catch Exception e
-               {::data data ::handling condition ::error-associating e})))
-         hierarchy !condition-hierarchy]
-     @(some #(% hierarchy condition real-data) *-handlers*))))
+   (-raise-coerced condition (-coerce-condition condition data))))
+
+(defn -with-stacktrace [map]
+  (assoc map ::stacktrace (.getStackTrace (Throwable.))))
+
+(defn raise
+  ([condition]
+   (raise condition nil))
+  ([condition data]
+   (-raise-coerced condition (-with-stacktrace (-coerce-condition condition data)))))
+
+(defn restart-with [cond_ restart-name & args]
+  (if-let [restart-fn (get (::restarts cond_) restart-name)]
+    (apply restart-fn args)
+    (raise ::no-such-restart {::cause cond_ :restart restart-name})))
 
 (defcondition ::error)
 (defcondition ::input-error ::error)
+(defcondition ::no-such-restart ::error)
 (defcondition ::warning)
 (defcondition ::not-a-condition)
 (defcondition ::handler-for-noncondition ::warning)
