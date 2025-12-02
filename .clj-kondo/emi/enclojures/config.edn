@@ -1,4 +1,5 @@
 {:hooks
  {:macroexpand
   {emi.enclojures.conditions/handling emi.enclojures.conditions/handling
-   emi.enclojures.staticenv/nloop emi.enclojures.staticenv/nloop}}}
+   emi.enclojures.staticenv/nloop emi.enclojures.staticenv/nloop
+   emi.enclojures.format/interp-block emi.enclojures.format/interp-block}}}
