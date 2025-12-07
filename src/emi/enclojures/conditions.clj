@@ -147,7 +147,7 @@
   (-try-if-finally `[1 2]))
 
 (defmacro handling [hspec & body]
-  `(binding [*-handlers* (conj *-handlers* ~(-emit-handler hspec))]
+  `(with-bindings {(var *-handlers*) (conj *-handlers* ~(-emit-handler hspec))}
      ~@(-try-if-finally body)))
 
 (defn -coerce-condition
