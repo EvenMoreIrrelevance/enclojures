@@ -1,0 +1,1 @@
+{:lint-as {emi.enclojures.destructure/-returning clojure.core/let}}

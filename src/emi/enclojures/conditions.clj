@@ -2,6 +2,8 @@
 
 (set! *warn-on-reflection* true)
 
+(def -set-stack-trace (memfn ^Exception setStackTrace st))
+
 (defonce !condition-hierarchy (make-hierarchy))
 (declare raise)
 (def ^:dynamic *-handlers*
@@ -15,10 +17,10 @@
           (println (str "caught warning: " cond_ "\n" (::message data)))
           (reduced nil))
         (isa? hier cond_ ::condition)
-        (throw (cond-> (ex-info 
-                         (str "unhandled condition: " cond_ "\n" (::message data)) 
+        (throw (cond-> (ex-info
+                         (str "unhandled condition: " cond_ "\n" (::message data))
                          (dissoc data ::stacktrace))
-                 (::stacktrace data) (doto (Exception/.setStackTrace (::stacktrace data)))))
+                 (::stacktrace data) (doto (-set-stack-trace (::stacktrace data)))))
         :else
         (reduced (raise ::not-a-condition {:condition cond_ :data data}))))))
 
@@ -39,8 +41,8 @@
 (defn undef-condition
   [condition]
   (alter-var-root (var !condition-hierarchy)
-    (fn [h] 
-      (or 
+    (fn [h]
+      (or
         (reduce #(underive % condition %2) h (parents h condition))
         (make-hierarchy)))))
 
@@ -107,8 +109,8 @@
 
 (defn -emit-handler
   [bodies]
-  (let [cache (intern 
-                (create-ns 'emi.enclojures.conditions.caches) 
+  (let [cache (intern
+                (create-ns 'emi.enclojures.conditions.caches)
                 (symbol (str "cache" (random-uuid)))
                 nil)
         handled (into #{} (map first) bodies)
@@ -119,7 +121,7 @@
                                               (map first)
                                               (remove (partial condition? !condition-hierarchy)))
                                     bodies))]
-        (raise ::handler-for-noncondition 
+        (raise ::handler-for-noncondition
           {::message (str "emitting handlers for non-conditions: " non-conditions)}))
       `(fn [hier# cond# ~data_]
          (case (-find-handler ~cache hier# ~handled cond#)

@@ -5,3 +5,6 @@
      (if (rand)
        (recur ~@(map first (partition 2 loop-head)))
        (do ~@body))))
+
+(defmacro nrecur [& args]
+  `(list ~@args))

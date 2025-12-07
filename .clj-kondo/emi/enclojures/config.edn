@@ -2,4 +2,9 @@
  {:macroexpand
   {emi.enclojures.conditions/handling emi.enclojures.conditions/handling
    emi.enclojures.staticenv/nloop emi.enclojures.staticenv/nloop
-   emi.enclojures.format/interp-block emi.enclojures.format/interp-block}}}
+   emi.enclojures.format/interp-block emi.enclojures.format/interp-block
+   emi.enclojures.destructure/defnc emi.enclojures.destructure/defnc 
+   emi.enclojures.destructure/fnc emi.enclojures.destructure/fnc
+   emi.enclojures.destructure/letc emi.enclojures.destructure/letc
+   emi.enclojures.destructure/nloopc emi.enclojures.destructure/nloopc
+   emi.enclojures.destructure/loopc emi.enclojures.destructure/loopc}}}
