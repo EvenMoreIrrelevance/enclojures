@@ -151,18 +151,18 @@
 (comment
   (let [the-same-kind-of-stand-as-star-platinum "Za Warudo!"
         mnaga "JoJo's Bizarre Adventures Part III"]
-    (interp-block "hello ${the-same-kind-of-stand-as-star-platinum} (holy ..it, is that a ${mnaga} reference??)")) 
+    (interp-block "hello ${the-same-kind-of-stand-as-star-platinum} (holy ..it, is that a ${mnaga} reference??)"))
   (interp-block "
                  dolla dolla 
                  $$ $$ $$ ${
                  :monies   } cash ston
-                   ks") 
+                   ks")
   (let [!counter (volatile! 0)]
     (interp-block "I sure do hope ordering stays left to right! ${(vswap! !counter inc)} ${(vswap! !counter inc)}"))
   (try
     (eval '(interp-block "I fail $ because of a bad special marker"))
-    (catch Exception e e)) 
-  (try 
+    (catch Exception e e))
+  (try
     (eval '(interp-block "I fail ${because of} trailing marker content"))
     (catch Exception e e))
   *e)

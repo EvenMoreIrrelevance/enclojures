@@ -25,7 +25,7 @@
            {::conditions/ignore #(-partition-bindings (concat bindings [nil]))}})
         out))))
 
-(comment 
+(comment
   (conditions/handling [(::unpaired-bindings c (conditions/restart-with c ::conditions/ignore))]
     (-partition-bindings [1 2 3])))
 
@@ -55,8 +55,8 @@
                                 mid (or bn (gensym))
                                 {subform-without-coercions :without-coercions :keys [coercions]}
                                 (-destructure-with-coercelist s)]
-                            (vswap! !binds conj `[~subform-without-coercions (~h ~mid ~@m)]) 
-                            (when (seq coercions) 
+                            (vswap! !binds conj `[~subform-without-coercions (~h ~mid ~@m)])
+                            (when (seq coercions)
                               (when bn
                                 (conditions/raise ::coercions-inside-named-arg
                                   {::conditions/message "NB: named args with coercions inside are bound to their uncoerced form."}))
@@ -81,7 +81,7 @@
 
 ;;; could use some specter here
 
-(defn -c-for-let-like 
+(defn -c-for-let-like
   [head form]
   (let [[binds & body] (next form)
         [lefts rights] (-partition-bindings binds)
@@ -142,7 +142,7 @@
 
 (comment
   (letc [(parse-long a) "3"] a)
-  
+
   (macroexpand-1 '(defnc foo [(int a)] a))
 
   (defnc foo2
