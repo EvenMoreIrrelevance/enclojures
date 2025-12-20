@@ -1,5 +1,6 @@
 (ns emi.enclojures.destructure
   (:require [clojure.walk :as walk]
+            [emi.enclojures.parity.core :refer [delay update-vals]]
             [emi.enclojures.conditions :as conditions]
             [emi.enclojures.staticenv :refer [nloop nrecur]]))
 
@@ -9,11 +10,6 @@
   `(let [val# ~val, ~bind val#]
      ~@body
      val#))
-
-#_{:clj-kondo/ignore [:redefined-var]}
-(defn update-vals
-  [m f]
-  (zipmap (keys m) (map f (vals m))))
 
 (defn -index-of [xs frm]
   (loop [xs xs i 0]
@@ -33,20 +29,6 @@
       (let [as-pos (-index-of form :as)]
         (when (nat-int? as-pos)
           (nth form (inc as-pos)))))))
-
-(defn -delay* [f]
-  (let [p (promise)]
-    (reify
-      clojure.lang.IDeref
-      (deref [_]
-        (when-not (realized? p)
-          (deliver p (f)))
-        @p))))
-
-#_{:clj-kondo/ignore [:redefined-var]}
-(defmacro delay
-  [& body]
-  `(-delay* (fn [] ~@body)))
 
 (conditions/defcondition ::coercions-inside-named-arg ::conditions/warning)
 (conditions/defcondition ::unpaired-bindings ::conditions/input-error)

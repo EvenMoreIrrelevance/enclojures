@@ -2,6 +2,7 @@
  {:macroexpand
   {emi.enclojures.conditions/handling emi.enclojures.conditions/handling
    emi.enclojures.staticenv/nloop emi.enclojures.staticenv/nloop
+   emi.enclojures.staticenv/fsm emi.enclojures.staticenv/fsm
    emi.enclojures.format/interp-block emi.enclojures.format/interp-block
    emi.enclojures.destructure/defnc emi.enclojures.destructure/defnc 
    emi.enclojures.destructure/fnc emi.enclojures.destructure/fnc

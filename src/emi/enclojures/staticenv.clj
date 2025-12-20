@@ -87,6 +87,17 @@
               color (assoc color curr :black)
               out (conj out curr))))))))
 
+(defmacro transition
+  [state & names->values]
+  (let [{[state-sym] ::nloop-var-names} (static-env)]
+    `(nrecur ~state-sym ~state ~@names->values)))
+
+(defmacro fsm
+  [init binds & states2forms]
+  `(nloop [state# ~init ~@binds]
+     (case state#
+       ~@states2forms)))
+
 (comment
   (-toposort
     {:a [:b :c :d]

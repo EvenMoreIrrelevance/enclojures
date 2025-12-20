@@ -8,3 +8,9 @@
 
 (defmacro nrecur [& args]
   `(list ~@args))
+
+(defmacro fsm
+  [init binds & states2forms]
+  `(nloop [state# ~init ~@binds]
+     (case state#
+       ~@states2forms)))

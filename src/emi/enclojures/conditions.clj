@@ -91,15 +91,22 @@
       e))
   *e)
 
+(defn -unwrap-weak-ref [self]
+  (if (instance? java.lang.ref.WeakReference self)
+    (recur (java.lang.ref.WeakReference/.get self))
+    self))
+
 (defn -find-handler
   [!inline-cache hierarchy handlers condition]
   (let [cached @!inline-cache
         {:keys [hier handlers-by-specificity]}
-        (if (identical? (:hier cached) hierarchy)
+        (if (identical? (-unwrap-weak-ref (:hier cached)) hierarchy)
           cached
-          (let [new_ {:hier hierarchy :handlers-by-specificity (-toposort (:descendants hierarchy) handlers)}]
+          (let [new_ {:hier (java.lang.ref.WeakReference. hierarchy) 
+                      :handlers-by-specificity (-toposort (:descendants hierarchy) handlers)}]
             (alter-var-root !inline-cache
-              (fn [_] new_))))]
+              (fn [_] new_))))
+        hier (-unwrap-weak-ref hier)]
     (some #(when (isa? hier condition %) %) handlers-by-specificity)))
 
 (defn -reduced-unless-pass

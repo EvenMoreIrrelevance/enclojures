@@ -2,7 +2,7 @@
   (:require
    [clojure.string :as str]
    [emi.enclojures.conditions :as conditions]
-   [emi.enclojures.staticenv :as staticenv :refer [nloop nrecur]]))
+   [emi.enclojures.staticenv :as staticenv :refer [fsm transition]]))
 
 (defn -blank-line-start-re
   ([whitespace]
@@ -101,47 +101,45 @@
   [syntax]
   (let [error (fn [state kind to-parse]
                 {:state state kind true :at (- (count syntax) (count to-parse)) :while-parsing to-parse})]
-    (nloop [to-parse syntax
-            state :str
-            errors []
-            out []]
-      (case state
-        :end
-        (if (not-empty errors)
-          (conditions/raise ::interp-not-parsable
-            {:syntax syntax :errors errors :best-effort out})
-          out)
-        :clj
-        (let [[obj consumed :as maybe-read]
-              (try (read+string (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. to-parse)))
-                (catch Exception _ nil))]
-          (nrecur state :after-clj
-            to-parse (subs to-parse (count consumed))
-            errors (cond-> errors (not maybe-read) (conj (error state :failed-parsing-clj? to-parse)))
-            out (conj out obj)))
-        :at-special-marker
-        (case (nth to-parse 0 nil)
-          \$ (nrecur state :str
-               out (conj out "$")
-               to-parse (subs to-parse 1))
-          \{ (nrecur state :clj
-               to-parse (subs to-parse (count (re-find #"^[{]\s*" to-parse))))
-          (nrecur state :str
-            errors (conj errors (error state :bad-special-marker? to-parse))))
-        :after-clj
-        (if-let [to-skip (re-find #"^\s*[}]" to-parse)]
-          (nrecur state :str
-            to-parse (subs to-parse (count to-skip)))
-          (nrecur state :str
-            to-parse to-parse
-            errors (conj errors (error state :unterminated-interp-marker? to-parse))))
-        :str
-        (if-let [dollar-ix (str/index-of to-parse "$")]
-          (nrecur state :at-special-marker
-            to-parse (subs to-parse (inc dollar-ix))
-            out (conj out (subs to-parse 0 dollar-ix)))
-          (nrecur state :end
-            out (conj out to-parse)))))))
+    (fsm :str [to-parse syntax
+               errors []
+               out []]
+      :end
+      (if (not-empty errors)
+        (conditions/raise ::interp-not-parsable
+          {:syntax syntax :errors errors :best-effort out})
+        out)
+      :clj
+      (let [[obj consumed :as maybe-read]
+            (try (read+string (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. to-parse)))
+              (catch Exception _ nil))]
+        (transition :after-clj
+          to-parse (subs to-parse (count consumed))
+          errors (cond-> errors (not maybe-read) (conj (error :after-clj :failed-parsing-clj? to-parse)))
+          out (conj out obj)))
+      :at-special-marker
+      (case (nth to-parse 0 nil)
+        \$ (transition :str
+             out (conj out "$")
+             to-parse (subs to-parse 1))
+        \{ (transition :clj
+             to-parse (subs to-parse (count (re-find #"^[{]\s*" to-parse))))
+        (transition :str
+          errors (conj errors (error :str :bad-special-marker? to-parse))))
+      :after-clj
+      (if-let [to-skip (re-find #"^\s*[}]" to-parse)]
+        (transition :str
+          to-parse (subs to-parse (count to-skip)))
+        (transition :str
+          to-parse to-parse
+          errors (conj errors (error :after-clj :unterminated-interp-marker? to-parse))))
+      :str
+      (if-let [dollar-ix (str/index-of to-parse "$")]
+        (transition :at-special-marker
+          to-parse (subs to-parse (inc dollar-ix))
+          out (conj out (subs to-parse 0 dollar-ix)))
+        (transition :end
+          out (conj out to-parse))))))
 
 (defmacro interp-block
   [strn]
