@@ -9,139 +9,52 @@
       val'
       (recur eq f val'))))
 
-(defn -ensure-reduced [x]
+(defn -ensure-reduced 
+  [x]
   (if (reduced? x)
     (reduced x)
     x))
 
-(defn -sresolve [in]
+(defn -sresolve 
+  [in]
   (cond
     (or (class? in) (var? in)) in
     (symbol? in) (resolve in)
     :else nil))
 
-(comment
-  `(xf
-     (keep set?)
-     (mapcat inc)
-     (filter odd?)
-     (take 3))
+(defprotocol _XfInliners
+  (-state [_ xf args])
+  (-init [_ state rf initform])
+  (-step [_ state rf acc in stepform])
+  (-finalize [_ state rf out finalform])
+  (-uses-rf? [_]))
 
-  (into [] (comp
-             (filter set?)
-             cat
-             (map inc)
-             (filter odd?)
-             (take 3))
-    [#{1 2 3 4 5 6} [4 5 6] #{1 2 3 4 5 6}])
+(defn -form-var [form]
+  (-sresolve
+    (if (sequential? form)
+      (first form)
+      form)))
 
+(defmulti -xf-inliners -form-var)
+(defmulti -xf-expand -form-var)
 
-  `(xf
-     (keep set?)
-     cat
-     (map inc)
-     (filter odd?)
-     (take 3))
-
-  `(eval
-     (deftype _Xf2_0 [rf keep-fn-69]
-       (invoke [_]
-         (rf))
-       (invoke [_ out]
-         (rf out))
-       (invoke [_ acc in]
-         (if-some [in (keep-fn-69 in)]
-           (rf acc in)
-           acc)))
-
-     (deftype _Xf2_1 [rf
-                      map-fn-69
-                      filter-p-69
-                      take-n-69]
-       (invoke [_]
-         (rf))
-       (invoke [_ out]
-         (rf out))
-       (invoke [_ acc in]
-         (let [in (map-fn-69 in)]
-           (if-not (filter-p-69 in)
-             acc
-             (do
-               (set! take-n-69 (dec take-n-69))
-               (if-not (neg? take-n-69)
-                 acc
-                 (rf acc in)))))))
-
-     (comp
-       (fn [rf] (_Xf2_0. rf set?))
-       cat
-       (fn [rf] (_Xf2_1. rf inc odd? 3))))
-
-  '(xf
-     (map inc)
-     (filter odd?)
-     (take 3)
-     (partition-all some-value))
-  '(eval (deftype _Xf [rf
-                       map-fn-123
-                       filter-fn-123
-                       ^:volatile-mutable ^long take-state-123
-                       ^long partition-count-123
-                       ^:volatile-mutable partition-state-123]
-           clojure.lang.IFn
-           (invoke [_]
-             (rf))
-           (invoke [_ in]
-             (let [final (vec (.toArray partition-state-123))
-                   out (unreduced (rf out final))]
-               (rf out)))
-           (invoke [_ acc in]
-             (let [in (map-fn-123 in)]
-               (if-not (filter-fn-123 in)
-                 acc
-                 (if (zero? take-state-123)
-                   (reduced acc)
-                   (if (= partition-count-123 (.size partition-state-123))
-                     (let [in (vec (.toArray partition-state-123))]
-                       (.clear partition-state-123)
-                       (rf acc in))
-                     (do (.add partition-state-123 in)
-                       acc)))))))
-     `(fn [rf] (_xf. rf inc odd? 3 some-value (java.util.ArrayList.))))
-  '(fn [rf]
-     (fn
-       ([] (rf)))))
+(defmethod -xf-inliners :default [_] nil)
+(defmethod -xf-expand :default [form] form)
 
 (conditions/defcondition ::unregistered-xf ::conditions/error)
-
-(defn -var-or-default [xf]
-  (let [var?? (-sresolve xf)]
-    (if (var? var??)
-      var??
-      :default)))
-
-(defmulti xf-state (fn [xf _args] (-var-or-default xf)))
-(defmulti xf-init (fn [xf _state _initform] (-var-or-default xf)))
-(defmulti xf-step (fn [xf _state _acc _in _stepform] (-var-or-default xf)))
-(defmulti xf-finalize (fn [xf _state _out _finalform] (-var-or-default xf)))
-(defmulti xf-expand (fn [[xf & _args]] (-var-or-default xf)))
-
-(defmethod xf-expand :default [frm] frm)
-
-(defmethod xf-state :default
-  [xf args]
-  (conditions/raise ::unregistered-xf
-    {:xf xf
-     ::conditions/restarts
-     {::conditions/retry #(xf-state xf args)}}))
 
 (defn -default-state
   [xf args]
   (mapv vector
     (map #(str (name xf) "-arg-" % "-") (range))
     args))
-(defn -default-init [_state initform] initform)
-(defn -default-finalize [_state _out finalform] finalform)
+
+(defn -default-init
+  ([_state initform] initform)
+  ([_state _rf initform] initform))
+(defn -default-finalize
+  ([_state _rf _out finalform] finalform)
+  ([_state _out finalform] finalform))
 
 (conditions/defcondition ::xf-step-not-registered ::conditions/input-error)
 
@@ -149,24 +62,33 @@
   [thevar {:keys [(or state -default-state)
                   (or init -default-init)
                   (or finalize -default-finalize)
-                  (or step (conditions/raise ::xf-step-not-registered))]}]
-  (defmethod xf-state thevar [xf args]
-    (state xf args))
-  (defmethod xf-init thevar [_xf state initform]
-    (init state initform))
-  (defmethod xf-finalize thevar [_xf state out finalform]
-    (finalize state out finalform))
-  (defmethod xf-step thevar [_xf state acc in stepform]
-    (step state acc in stepform))
-  {:state state
-   :init init
-   :finalize finalize
-   :step step})
+                  (or step (conditions/raise ::xf-step-not-registered))
+                  (boolean uses-rf?)]}]
+  (let [impl
+        (reify
+          _XfInliners
+          (-uses-rf? [_] uses-rf?)
+
+          (-state [_ xf args]
+            (state xf args))
+          (-init [_ state rf initform]
+            (if uses-rf?
+              (init state rf initform)
+              (init state initform)))
+          (-step [_ state rf acc in stepform]
+            (if uses-rf?
+              (step state rf acc in stepform)
+              (step state acc in stepform)))
+          (-finalize [_ state rf out finalform]
+            (if uses-rf?
+              (finalize state rf out finalform)
+              (finalize state out finalform))))]
+    (defmethod -xf-inliners thevar [_] impl)))
 
 (defn register-xf-expander!*
   [thevar fun]
-  (defmethod xf-expand thevar [args]
-    (apply fun args)))
+  (defmethod -xf-expand thevar [form]
+    (apply fun (when (sequential? form) (next form)))))
 
 (defn xreductions [f init]
   (fn [rf]
@@ -232,6 +154,33 @@
                 (let [~in (~f last# ~in)]
                   ~stepform))))})
 
+(defn partition-when
+  [partition?]
+  (fn partition-when-transducer [rf]
+    (let [!chunk (java.util.ArrayList.)
+          chunk-step (fn chunk-step [acc]
+                       (rf acc
+                         (let [v (vec (.toArray !chunk))]
+                           (.clear !chunk)
+                           v)))]
+      (fn partition-when-rf
+        ([] (rf))
+        ([out]
+         (rf
+           (if (zero? (.size !chunk))
+             out
+             (unreduced (chunk-step out)))))
+        ([acc in]
+         (let [cs (.size !chunk)
+               acc'
+               (if (or
+                     (zero? cs)
+                     (not (partition? (.get !chunk (dec cs)) in)))
+                 acc
+                 (chunk-step acc))]
+           (when-not (reduced? acc') (.add !chunk in))
+           acc'))))))
+
 (comment
   (into [] (lag +) [1 2])
 
@@ -244,6 +193,7 @@
   (into [] (cartesian [1 2 3] [1 2 3])
     [1 2 3])
   
+  (into [] (partition-when >) [1 2 3 1 2 3 1])
   *e)
 
 (register-xf!* (var distinct)
@@ -278,7 +228,7 @@
               ~acc))})
 
 (register-xf-expander!* (var remove)
-  (fn remove-expander [_ f]
+  (fn remove-expander [f]
     `(filter (complement ~f))))
 
 (register-xf!* (var take-while)
@@ -324,23 +274,34 @@
    :step (fn [[n] acc _in stepform]
            `(do
               (set! ~n (dec ~n))
-              (if (neg? ~n)
-                ~stepform
-                ~acc)))})
+              (if (nat-int? ~n)
+                ~acc
+                ~stepform)))})
+
+(register-xf!* (var cat)
+  {:uses-rf? true
+   :state (fn [_ []]
+            [["cat-subrf" nil {:volatile-mutable true}]])
+   :init (fn [[subrf] rf initform]
+           `(do
+              (set! ~subrf (comp -ensure-reduced ~rf))
+              ~initform))
+   :step (fn [[subrf] _rf acc in _stepform] 
+           `(reduce ~subrf ~acc ~in))})
 
 (register-xf-expander!* (var mapcat)
-  (fn [_ f]
+  (fn [f]
     `(comp
        cat
        (map ~f))))
 
 (defn -tree-rf-step
-  ([rf node? children]
-   (fn tree-rf-step [acc in]
-     (-ensure-reduced
-       (if (node? in)
-         (reduce tree-rf-step acc (children in))
-         (rf acc in))))))
+  [rf node? children]
+  (fn tree-rf-step [acc in]
+    (-ensure-reduced
+      (if (node? in)
+        (reduce tree-rf-step acc (children in))
+        (rf acc in)))))
 
 (defn tree
   ([node?]
@@ -366,23 +327,29 @@
                    (tree
                      #(and (seq? %) (see-through? (-sresolve (first %))))
                      next)
-                   (map #(if (seq? %)
-                           (-fixpoint identical? xf-expand %)
-                           %)))
+                   (map #(-fixpoint identical? -xf-expand %)))
           args))
       args)))
 
-(defn -ensure-sequential [x]
+(defn -ensure-sequential 
+  [x]
   (if-not (sequential? x)
     (list x)
     x))
 
-(defn -xf-inlinable
-  [expr]
-  (if (contains? (methods xf-state)
-        (-sresolve (first (-ensure-sequential expr))))
-    ::inlinable
-    (Object.)))
+;;;; The idea here is that sth like `cat` can sensibly expand if it can work with its own `rf`,
+;;;; allowing to inline, say, [(keep <...>) cat].
+;;;; However, uninlinable xforms should stay isolated.
+(defn -xf-chunks
+  []
+  (partition-when 
+    (fn xf-chunks-partitioner [old curr]
+      (or 
+        (not (-xf-inliners curr))
+        (let [i (-xf-inliners old)]
+          (or
+            (not i)
+            (-uses-rf? i)))))))
 
 (defn -pull-args
   [[xf & args]]
@@ -398,34 +365,34 @@
     (let [bindings-and-xfs (mapv #(-pull-args (-ensure-sequential %)) xfs)
           bindings (mapcat :bindings bindings-and-xfs)
           xfs (map :form bindings-and-xfs)
-          states (mapv (fn [[h & args]]
-                         (xf-state h args)) xfs)
+          inliners (map -xf-inliners xfs)
+          states (mapv (fn [i [h & args]] (-state i h args)) inliners xfs)
           init-lists (mapv (fn [specs]
                              (mapv (fn [[h _v m]]
                                      (with-meta (gensym (symbol h)) m))
                                specs))
                        states)
-          steps (rseq (mapv vector (map first xfs) init-lists))
+          steps (rseq (mapv vector inliners init-lists))
           acc_ (gensym "acc")
           in_ (gensym "in")
           out_ (gensym "out")
           rf_ (gensym "rf")
-          self_ `_#
+          self_ `_self#
           typname (with-meta (symbol (str "_Xf" (random-uuid))) {:private true})]
       {:type
        `(deftype ~typname [~rf_ ~@(apply concat init-lists)]
           clojure.lang.IFn
           (~'invoke
            [~self_]
-           ~(reduce (fn [initform [h state]] (xf-init h state initform))
+           ~(reduce (fn [initform [inliner state]] (-init inliner state rf_ initform))
               `(~rf_) steps))
           (~'invoke
            [~self_ ~out_]
-           ~(reduce (fn [finalform [h state]] (xf-finalize h state out_ finalform))
+           ~(reduce (fn [finalform [inliner state]] (-finalize inliner state rf_ out_ finalform))
               `(~rf_ ~out_) steps))
           (~'invoke
            [~self_ ~acc_ ~in_]
-           ~(reduce (fn [stepform [h state]] (xf-step h state acc_ in_ stepform))
+           ~(reduce (fn [stepform [inliner state]] (-step inliner state rf_ acc_ in_ stepform))
               `(~rf_ ~acc_ ~in_) steps))
           (~'applyTo
            [~self_ seq#]
@@ -434,56 +401,39 @@
        `(let [~@bindings]
           (fn [rf#] (new ~typname rf# ~@(map (fn [[_h v _m]] v) (apply concat states)))))})))
 
-(defn -xf* [& args]
+(defn -xf* 
+  [& args]
   (let [types-and-fns
         (into [] (comp
-                   (partition-by -xf-inlinable)
+                   (-xf-chunks)
                    (map -xf-chunk->type-and-fn))
           (-xf-chain args))]
     (run! eval (keep :type types-and-fns))
     `(comp ~@(map :fn types-and-fns))))
 
 (comment
-  (xf-expand `(remove odd?))
-
-  (into [] (comp
-             (partition-by even?)
-             (map vec))
-    [1 2 2 3 3 3 4])
+  (-xf-expand `(remove odd?))
   
   (into [] (comp
-             (partition-by -xf-inlinable)
+             (-xf-chunks)
              (map -xf-chunk->type-and-fn))
     (-xf-chain
       '[(mapcat dec)
         (remove odd?)
         (map inc)
+        (partition-all 3)
         (drop 9)
         (dedupe)
         (comp
           cat
           cat
           (keep 5))]))
-  
-  (mapv -xf-chunk->type-and-fn
-    (partition-by -xf-inlinable
-      (-xf-chain
-        '[(mapcat dec)
-          (remove odd?)
-          (map inc)
-          (drop 9)
-          (dedupe)
-          (comp
-            cat
-            cat
-            (keep 5))]))) 
-
-  (methods xf-state)
 
   (apply -xf*
     '[(mapcat dec)
       (remove odd?)
       (map inc)
+      (partition-all 3)
       (drop 9)
       (dedupe)
       (comp
@@ -492,7 +442,8 @@
         (keep odd?))])
   *e)
 
-(defmacro xf [& args]
+(defmacro xf 
+  [& args]
   (apply -xf* args))
 
 (comment
