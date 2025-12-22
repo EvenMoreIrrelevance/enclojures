@@ -149,10 +149,10 @@
       (fn -eq-by-count? [a b] (= (count a) (count b)))
       (fn expand [args]
         (into [] (comp
+                   (map #(-fixpoint identical? -xf-expand %))
                    (tree
                      #(and (seq? %) (see-through? (-sresolve (first %))))
-                     next)
-                   (map #(-fixpoint identical? -xf-expand %)))
+                     next))
           args))
       args)))
 
@@ -238,6 +238,15 @@
 
 (comment
   (-xf-expand `(remove odd?))
+
+  (-xf-chain
+    '((tree #(not (number? %)))
+      (lag max)
+      (map inc)
+      (take 3)
+      (lag +)
+      (cartesian [1 2 3] [4 5])
+      cat))
 
   (into [] (comp
              (-xf-chunks)
@@ -458,7 +467,6 @@
                 (let [~in (~f last# ~in)]
                   ~stepform))))})
 
-
 (comment
   (into [] (lag +) [1 2])
 
@@ -471,10 +479,25 @@
   (into [] (cartesian [1 2 3] [1 2 3])
     [1 2 3])
 
-  (into [] (xf
-             (tree #(not (number? %)))
-             (lag max)
-             (map inc)
-             (take 3))
-    [[1 2 3] 4 [[5 6]]])
+  (macroexpand-1
+    '(xf
+       (tree #(not (number? %)))
+       (lag max)
+       (map inc)
+       (take 3)
+       (lag +)
+       (cartesian [1 2 3] [4 5])
+       cat))
+
+  (time 
+    (into [] (xf
+               (tree #(not (number? %)))
+               (lag max)
+               (map inc)
+               (take 3)
+               (lag +)
+               (cartesian [1 2 3] [4 5])
+               cat)
+      (repeat 10000 [[1 2 3] 4 [[5 6]]])))
+  
   *e)
