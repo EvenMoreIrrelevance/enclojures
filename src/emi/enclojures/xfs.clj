@@ -489,15 +489,28 @@
        (cartesian [1 2 3] [4 5])
        cat))
 
-  (time 
-    (into [] (xf
-               (tree #(not (number? %)))
-               (lag max)
-               (map inc)
-               (take 3)
-               (lag +)
-               (cartesian [1 2 3] [4 5])
-               cat)
-      (repeat 10000 [[1 2 3] 4 [[5 6]]])))
+  (require '[criterium.core :as criterium])
+
+  ;; actually a fairly generous comparison for `comp`
+
+  (criterium/quick-bench
+    (transduce (xf
+                 (tree #(not (number? %)))
+                 (lag max)
+                 (map inc)
+                 (lag +)
+                 (cross [1 2 3])
+                 (map #(* (% 0) (% 1))))
+      + [1 2 3 4 5 6]))
   
+  (criterium/quick-bench
+    (transduce (comp
+                 (tree #(not (number? %)))
+                 (lag max)
+                 (map inc)
+                 (lag +)
+                 (cross [1 2 3])
+                 (map #(* (% 0) (% 1))))
+      + [1 2 3 4 5 6]))
+
   *e)
