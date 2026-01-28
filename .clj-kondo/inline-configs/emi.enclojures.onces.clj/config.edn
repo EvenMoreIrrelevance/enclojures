@@ -1,0 +1,1 @@
+{:lint-as {emi.enclojures.onces/with-statics clojure.core/let}}

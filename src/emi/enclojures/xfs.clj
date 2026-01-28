@@ -23,7 +23,7 @@
     :else nil))
 
 (defprotocol _XfInliners
-  (-state [_ xf args])
+  (-state [_ xf rf args])
   (-init [_ state rf initform])
   (-step [_ state rf acc in stepform])
   (-finalize [_ state rf out finalform])
@@ -42,10 +42,12 @@
 (defmethod -xf-expand :default [form] form)
 
 (defn -default-state
-  [xf args]
-  (mapv vector
-    (map #(str (name xf) "-arg-" % "-") (range))
-    args))
+  ([xf args]
+   (-default-state xf nil args))
+  ([xf _rf args]
+   (mapv vector
+     (map #(str (name xf) "-arg-" % "-") (range))
+     args)))
 
 (defn -default-init
   ([_state initform] initform)
@@ -67,8 +69,10 @@
           _XfInliners
           (-uses-rf? [_] uses-rf?)
 
-          (-state [_ xf args]
-            (state xf args))
+          (-state [_ xf rf args]
+            (if uses-rf?
+              (state xf rf args)
+              (state xf args)))
           (-init [_ state rf initform]
             (if uses-rf?
               (init state rf initform)
@@ -187,21 +191,22 @@
   (if (= 1 (count (-ensure-sequential xfs)))
     {:type nil
      :fn (first xfs)}
-    (let [bindings-and-xfs (mapv #(-pull-args (-ensure-sequential %)) xfs)
+    (let [acc_ (gensym "acc")
+          in_ (gensym "in")
+          out_ (gensym "out")
+          rf_ (gensym "rf")
+          bindings-and-xfs (mapv #(-pull-args (-ensure-sequential %)) xfs)
           bindings (mapcat :bindings bindings-and-xfs)
           xfs (map :form bindings-and-xfs)
           inliners (map -xf-inliners xfs)
-          states (mapv (fn [i [h & args]] (-state i h args)) inliners xfs)
+          states (mapv (fn [i [h & args]] (-state i h rf_ args)) inliners xfs)
           init-lists (mapv (fn [specs]
                              (mapv (fn [[h _v m]]
                                      (with-meta (gensym (symbol h)) m))
                                specs))
                        states)
           steps (rseq (mapv vector inliners init-lists))
-          acc_ (gensym "acc")
-          in_ (gensym "in")
-          out_ (gensym "out")
-          rf_ (gensym "rf")
+
           self_ `_self#
           typname (with-meta (symbol (str "_Xf" (random-uuid))) {:private true})]
       {:type
@@ -224,7 +229,7 @@
            (clojure.lang.AFn/applyToHelper ~self_ seq#)))
        :fn
        `(let [~@bindings]
-          (fn [rf#] (new ~typname rf# ~@(map (fn [[_h v _m]] v) (apply concat states)))))})))
+          (fn [~rf_] (new ~typname ~rf_ ~@(map (fn [[_h v _m]] v) (apply concat states)))))})))
 
 (defn -xf*
   [& args]
@@ -274,6 +279,7 @@
         cat
         cat
         (keep odd?))])
+  
   *e)
 
 (defmacro xf
@@ -364,12 +370,8 @@
 
 (register-xf!* (var cat)
   {:uses-rf? true
-   :state (fn [_ []]
-            [["cat-subrf" nil {:volatile-mutable true}]])
-   :init (fn [[subrf] rf initform]
-           `(do
-              (set! ~subrf (comp -preserve-reduced ~rf))
-              ~initform))
+   :state (fn [_ rf []]
+            [["cat-subrf" `(comp -preserve-reduced ~rf)]])
    :step (fn [[subrf] _rf acc in _stepform]
            `(reduce ~subrf ~acc ~in))})
 
@@ -417,7 +419,7 @@
 
 (register-xf!* (var cross)
   {:uses-rf? true
-   :state (fn [_ args]
+   :state (fn [_ _rf args]
             (apply (fn cross-state
                      ([reducible]
                       (cross-state `vector reducible))
@@ -434,7 +436,7 @@
     (cross vector redu1)
     (map #(cross conj %) reducibles)))
 
-(register-xf-expander!* (var cartesian) 
+(register-xf-expander!* (var cartesian)
   (fn [redu1 & reducibles]
     `(comp
        (cross ~redu1)
@@ -495,22 +497,24 @@
 
   (criterium/quick-bench
     (transduce (xf
+                 cat
                  (tree #(not (number? %)))
                  (lag max)
                  (map inc)
                  (lag +)
                  (cross [1 2 3])
                  (map #(* (% 0) (% 1))))
-      + [1 2 3 4 5 6]))
-  
+      + [[1 2 3 [4 5] 6]]))
+
   (criterium/quick-bench
     (transduce (comp
+                 cat
                  (tree #(not (number? %)))
                  (lag max)
                  (map inc)
                  (lag +)
                  (cross [1 2 3])
                  (map #(* (% 0) (% 1))))
-      + [1 2 3 4 5 6]))
+      + [[1 2 3 [4 5] 6]]))
 
   *e)
